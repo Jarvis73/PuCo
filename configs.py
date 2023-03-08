@@ -49,8 +49,10 @@ def settings(ex: Experiment):
         print_interval = 50             # print interval, by iterations
         val_interval = 1000             # validation interval, by iterations
 
-        mongo_host = ""                 # for MongoObserver
-        mongo_port = 8854               # for MongoObserver
+        mongo_host = "localhost"        # for MongoObserver
+        mongo_port = 17104              # for MongoObserver
+        mongo_name = ""
+        mongo_pwd = ""
         fileStorage = True              # use fileStorageObserver
         mongodb = False                 # use MongoObserver
 
@@ -227,8 +229,9 @@ def add_observers(ex, config, fileStorage=True, MongoDB=True, db_name="default")
 
     if MongoDB:
         try:
+            name, pwd = config["mongo_name"], config["mongo_pwd"]
             host, port = config["mongo_host"], config["mongo_port"]
-            observer_mongo = MongoObserver(url=f"{host}:{port}", db_name=db_name)
+            observer_mongo = MongoObserver(url=f"mongodb://{name}:{pwd}@{host}:{port}/{db_name}", db_name=db_name)
             ex.observers.append(observer_mongo)
         except ModuleNotFoundError:
             # Ignore Mongo Observer

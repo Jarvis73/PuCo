@@ -4,6 +4,7 @@ from contextlib import nullcontext
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+from pathlib import Path
 
 from models.deeplabv2 import Deeplab
 from models.discriminator import FCDiscriminator
@@ -37,6 +38,8 @@ class PuCo(object):
         ### Define segmentation Base(student) model ###
         self.BaseNet = Deeplab(nn.BatchNorm2d, self.opt.os, mtype='Base', opt=opt)
         resume_path = resume_path or opt.resume_path
+        if resume_path is not None:
+            resume_path = Path(resume_path)
         self.checkpoint = self.load_base_weights(self.BaseNet, resume_path)
         self.nets.extend([self.BaseNet])
         self.BaseNet_DP = self.init_device(self.BaseNet)
@@ -296,12 +299,14 @@ class PuCo(object):
         self.optimizer_D.zero_grad()
         source_D_out = self.net_D_DP(F.softmax(source_outputUp.detach(), dim=1))
         target_D_out = self.net_D_DP(F.softmax(target_outputUp.detach(), dim=1))
-        loss_D = self.bceloss(source_D_out,
-                              torch.FloatTensor(source_D_out.data.size())
-                              .fill_(self.adv_source_label).to(source_D_out.device)) + \
-                    self.bceloss(target_D_out,
-                                 torch.FloatTensor(target_D_out.data.size())
-                                 .fill_(self.adv_target_label).to(target_D_out.device))
+        loss_D = (
+            self.bceloss(source_D_out,
+                         torch.FloatTensor(source_D_out.data.size())
+                         .fill_(self.adv_source_label).to(source_D_out.device)) +
+            self.bceloss(target_D_out,
+                         torch.FloatTensor(target_D_out.data.size())
+                         .fill_(self.adv_target_label).to(target_D_out.device))
+        )
         loss_D.backward()
         self.optimizer_D.step()
 
@@ -311,14 +316,7 @@ class PuCo(object):
             'D': loss_D.item()
         }
 
-    def step_self_training(self, source_x, source_label, target_x, target_image2=None, target_pseudo_label=None, 
-                           kwargs1={}, kwargs2={}, epoch=None):
-
-        ### Compute increasing factor (gamma) of intra-domain consistency ###
-        factor = 1.
-        if self.opt.inc_intra_weights == 'linear':
-            factor = max(0, (epoch % self.stage_epochs) - self.opt.inc_warmup) / (self.stage_epochs - self.opt.inc_warmup)
-
+    def _step_self_training_source(self, source_x, source_label):
         context = torch.cuda.amp.autocast if self.opt.amp else nullcontext
 
         # ==================================================================================================
@@ -351,12 +349,12 @@ class PuCo(object):
                 for l in self.opt.style_transfer_layers:
                     fmean = self.BaseNet.__getattr__(f"features_mean_{l}")  # [n_cls, B, C]
                     fstd = self.BaseNet.__getattr__(f"features_std_{l}")    # [n_cls, B, C]
-                    
+
                     # shuffle
                     perm = torch.randperm(fmean.size(1))
                     fmean = fmean[:, perm, :]
                     fstd = fstd[:, perm, :]
-                    
+
                     # construct new batch axis
                     fmean = torch.stack(fmean.chunk(self.num_devices, 1), dim=0)   # [2, n_cls, B//2, C]
                     fstd = torch.stack(fstd.chunk(self.num_devices, 1), dim=0)     # [2, n_cls, B//2, C]
@@ -378,6 +376,22 @@ class PuCo(object):
             loss_src_all = loss_src_all * self.opt.srcW
 
         self._backward(loss_src_all)
+
+        return loss_src, loss_src_style
+
+
+    def step_self_training(self, source_x, source_label, target_x, target_image2=None, target_pseudo_label=None, 
+                           kwargs1={}, kwargs2={}, epoch=None):
+
+        ### Compute increasing factor (gamma) of intra-domain consistency ###
+        factor = 1.
+        if self.opt.inc_intra_weights == 'linear':
+            factor = max(0, (epoch % self.stage_epochs) - self.opt.inc_warmup) / (self.stage_epochs - self.opt.inc_warmup)
+
+        context = torch.cuda.amp.autocast if self.opt.amp else nullcontext
+
+        # ==================================================================================================
+        loss_src, loss_src_style = self._step_self_training_source(source_x, source_label)
 
         # ==================================================================================================
         with context():
@@ -432,11 +446,11 @@ class PuCo(object):
                     q2 = interpb(target_out2['proj'], upsize)
 
                     with torch.no_grad():
-                        ema_out = self._forward(self.BaseNet_ema_DP, target_x)
-                        z1 = interpb(ema_out['feat'], upsize)
+                        z1 = self._forward(self.BaseNet_ema_DP, target_x)['feat']
+                        z1 = interpb(z1, upsize)
                         z1 = self.maybe_recover_pos(kwargs1, z1)
-                        ema_out2 = self._forward(self.BaseNet_ema_DP, target_image2)
-                        z2 = interpb(ema_out2['feat'], upsize)
+                        z2 = self._forward(self.BaseNet_ema_DP, target_image2)['feat']
+                        z2 = interpb(z2, upsize)
                         z2 = self.maybe_recover_pos(kwargs2, z2)
                     
                     loss_stu_tea = self._normalized_l2_loss(q1, q2, z1, z2) * (self.opt.stu_teaW * factor)

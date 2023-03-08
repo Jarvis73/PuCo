@@ -14,7 +14,7 @@ from constants import on_cloud
 from utils_ import Accumulator, Timer, interpb, save_ckpt, maybe_extract_datasets
 from utils_pl import maybe_generate_pseudo_label
 
-ex = Experiment("UDASS", base_dir=Path(__file__).parent, save_git_info=False)
+ex = Experiment("PuCo", base_dir=Path(__file__).parent, save_git_info=False)
 settings(ex)
 
 

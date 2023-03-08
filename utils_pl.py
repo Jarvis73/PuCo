@@ -3,6 +3,7 @@ import math
 import shutil
 import tarfile
 from pathlib import Path
+from tqdm import tqdm
 
 from PIL import Image
 import torch
@@ -80,7 +81,7 @@ class PseudoLabelSaver(object):
 def inference_all(model, datasets, device, soft=True, hard=True):
     softs, confs, preds, image_paths = [], [], [], []   # we save all the probs, although it consumes a lot of memory 
     with torch.no_grad():
-        for batch in datasets.target_pl_loader:
+        for batch in tqdm(datasets.target_pl_loader):
             images_val = batch['image'].to(device)
             out = F.softmax(model.BaseNet_DP(images_val)['out'], dim=1)
 
@@ -183,7 +184,7 @@ def generate_pseudo_label(opt, logger, device, model, datasets, thresh, status_p
     logger.info("Step 3: Generate class-balanced pseudo labels with CBST thresholds")
     cls_thresh = all_cls_thresh[f'{thresh:.2f}']
     saver = PseudoLabelSaver(opt, logger, device, pl_dir, cls_thresh, 'np')
-    for prob_i, img_p in zip(softs, image_paths):
+    for prob_i, img_p in tqdm(zip(softs, image_paths)):
         saver.save(prob_i, upsize, Path(img_p).stem + '.png')
     # make tar file for future usage
     saver.make_tar(moveto=pl_tar_path)
@@ -231,7 +232,7 @@ def maybe_generate_pseudo_label(opt, logger, device, model, datasets, stage, exp
         upsize = datasets.target_pl.img_size
         with torch.no_grad():
             saver = PseudoLabelSaver(opt, logger, device, local_pl_dir, cls_thresh, 'torch')
-            for batch in datasets.target_pl_loader:
+            for batch in tqdm(datasets.target_pl_loader):
                 images_val = batch['image'].to(device)
                 out = F.softmax(model.BaseNet_DP(images_val)['out'], dim=1)
                 for prob_i, img_p in zip(out, batch['image_path']):

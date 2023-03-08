@@ -15,8 +15,7 @@ source activate puco
 
 conda install pytorch==1.6.0 torchvision==0.7.0 cudatoolkit=10.1 -c pytorch
 conda install scipy=1.6.2 tqdm
-pip install git+https://github.com/IDSIA/sacred.git@0.8.3
-
+pip install opencv-python sacred
 pip install pymongo # (optional) for MongoObserver
 ```
 </details>
